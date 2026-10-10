@@ -1,0 +1,46 @@
+name: Native Intel Mac Build + GPU Smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos-intel:
+    runs-on: macos-15-intel
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve dependency lock for reproducible CI run
+        run: cargo generate-lockfile
+      - name: Unit tests (including LUT parsing/catalog/colors)
+        run: cargo test --locked --all-targets
+      - name: Build Intel native executable
+        run: cargo build --release --locked --target x86_64-apple-darwin
+      - name: Package native .app
+        run: bash scripts/make_app.sh
+      - name: Verify architecture
+        run: |
+          file dist/NoirRAW.app/Contents/MacOS/noirraw
+          lipo -archs dist/NoirRAW.app/Contents/MacOS/noirraw | grep -qx x86_64
+      - name: Native Metal GPU smoke (headless; hosted GPU availability varies)
+        id: gpu_smoke
+        continue-on-error: true
+        run: cargo run --release --locked -- --smoke-gpu
+      - name: Record GPU smoke result clearly
+        if: always()
+        env:
+          OUTCOME: ${{ steps.gpu_smoke.outcome }}
+        run: |
+          echo "### NoirRAW Metal smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "Status: **$OUTCOME** (hardware-dependent; never interpret skipped/failed as pass)." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoirRAW-macOS-Intel
+          path: dist/NoirRAW-macOS-Intel.zip
+          if-no-files-found: error

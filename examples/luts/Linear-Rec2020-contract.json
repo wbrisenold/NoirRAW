@@ -1,0 +1,6 @@
+{
+  "input_space": "linear_rec2020_signed_log",
+  "output_space": "sRGB",
+  "shaper": "noirraw_signed_log_v1",
+  "stage": "full_film_print"
+}

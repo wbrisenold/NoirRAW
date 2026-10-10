@@ -1,0 +1,451 @@
+import { Button, Slider, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+
+// Design tokens (from lightkub observed dark theme)
+export global DesignTokens {
+    // Chrome (top bar, side panels, bottom bar)
+    out property <brush> chrome: #2d2d2d;
+    // Photo canvas (detail view)
+    out property <brush> canvas: #1c1c1c;
+    // Grid background behind cells
+    out property <brush> grid_bg: #0f0f0f;
+    // Cell background
+    out property <brush> cell: #1c1c1c;
+    out property <brush> cell_selected: #2d2d2d;
+    out property <brush> divider: #1c1c1c;
+    out property <brush> inset: #232323;
+    out property <brush> field: #222222;
+    out property <brush> field_border: #3c3c3c;
+    out property <brush> button: #242424;
+    out property <brush> button_border: #4c4c4c;
+    out property <brush> hover: #3a3a3a;
+    out property <brush> pressed: #3f3f3f;
+    out property <brush> tool_active: #3f3f3f;
+    out property <brush> text: #e2e2e2;
+    out property <brush> text_label: #bcbcbc;
+    out property <brush> text_dim: #8e8e8e;
+    out property <brush> text_disabled: #5c5c5c;
+    out property <brush> icon: #9a9a9a;
+    out property <brush> track: #5a5a5a;
+    out property <brush> thumb: #a0a0a0;
+    out property <brush> thumb_hover: #e0e0e0;
+    out property <brush> accent: #0165dd;
+    out property <brush> star: #d8d8d8;
+    out property <brush> pick: #f0f0f0;
+    out property <brush> reject: #e04a4a;
+    out property <brush> caution: #e3a83c;
+    out property <brush> mask_overlay: #e02030;
+    
+    // Color labels
+    out property <brush> color_red: #de4848;
+    out property <brush> color_yellow: #e8c43a;
+    out property <brush> color_green: #58b05c;
+    out property <brush> color_blue: #4882de;
+    out property <brush> color_purple: #9e64d2;
+    
+    // Metrics (points)
+    out property <length> top_bar_h: 42px;
+    out property <length> bottom_bar_h: 48px;
+    out property <length> panel_w: 270px;
+    out property <length> strip_w: 48px;
+    out property <length> slider_row_h: 45px;
+    out property <length> section_h: 57px;
+    out property <length> film_h: 142px;
+    out property <length> cell_size: 180px;
+    out property <length> cell_padding: 8px;
+    out property <length> border_radius: 4px;
+}
+
+export struct ThumbnailData {
+    path: string,
+    name: string,
+    rating: int,
+    color_label: int,
+    pick_reject: int,
+    thumbnail: image,
+    width: int,
+    height: int,
+    has_raw: bool,
+    is_selected: bool,
+    is_active: bool,
+}
+
+export component ThumbnailView inherits Rectangle {
+    in property <ThumbnailData> data;
+    callback clicked();
+    callback double_clicked();
+    callback right_clicked(Point);
+
+    background: DesignTokens.cell;
+    border-radius: DesignTokens.border_radius;
+    border-width: 1px;
+    border-color: DesignTokens.divider;
+    width: DesignTokens.cell_size;
+    height: DesignTokens.cell_size + 40px;
+    
+    // Selection ring
+    Rectangle {
+        x: -2px; y: -2px;
+        width: parent.width + 4px; height: parent.height + 4px;
+        background: transparent;
+        border-radius: 6px;
+        border-width: 2px;
+        border-color: data.is_active ? DesignTokens.accent : 
+                       data.is_selected ? #888 : Colors.transparent;
+        clip: true;
+    }
+
+    VerticalLayout {
+        padding-left: 4px; padding-right: 4px; padding-top: 4px; padding-bottom: 4px; spacing: 4px;
+        
+        // Thumbnail area
+        Rectangle {
+            background: DesignTokens.grid_bg;
+            border-radius: 3px;
+            vertical-stretch: 1;
+            Image {
+                source: data.thumbnail;
+                image-fit: cover;
+                width: parent.width; height: parent.height;
+            }
+            
+            // Rating stars overlay (top-left)
+            HorizontalLayout {
+                x: 4px; y: 4px; spacing: 1px;
+                for star[i] in 5 : Text {
+                    text: i + 1 <= data.rating ? "★" : "☆";
+                    color: i + 1 <= data.rating ? DesignTokens.star : DesignTokens.text_dim;
+                    font-size: 10px;
+                }
+            }
+            
+            // Color label bar (bottom)
+            Rectangle {
+                x: 4px; y: parent.height - 7px;
+                width: parent.width - 8px; height: 3px;
+                background: data.color_label == 1 ? DesignTokens.color_red :
+                           data.color_label == 2 ? DesignTokens.color_yellow :
+                           data.color_label == 3 ? DesignTokens.color_green :
+                           data.color_label == 4 ? DesignTokens.color_blue :
+                           data.color_label == 5 ? DesignTokens.color_purple :
+                           transparent;
+                border-radius: 1px;
+                visible: data.color_label != 0;
+            }
+            
+            // Pick/Reject badge
+            Rectangle {
+                x: 4px; y: parent.height - 14px;
+                background: #0008;
+                border-radius: 2px;
+                padding-left: 2px; padding-right: 4px; padding-top: 2px; padding-bottom: 2px;
+                Text {
+                    text: data.pick_reject == 1 ? "✓" : 
+                          data.pick_reject == -1 ? "✗" : "";
+                    color: data.pick_reject == 1 ? DesignTokens.pick : 
+                           data.pick_reject == -1 ? DesignTokens.reject : transparent;
+                    font-size: 11px; font-weight: 700;
+                }
+            }
+            
+            // RAW badge
+            Rectangle {
+                x: 4px; y: 22px;
+                background: #0008;
+                border-radius: 2px;
+                padding-left: 1px; padding-right: 3px; padding-top: 1px; padding-bottom: 1px;
+                visible: data.has_raw;
+                Text {
+                    text: data.has_raw ? "RAW" : "";
+                    color: DesignTokens.caution;
+                    font-size: 9px; font-weight: 600;
+                }
+            }
+        }
+        
+        Text {
+            text: data.name;
+            color: DesignTokens.text;
+            font-size: 11px;
+            wrap: word-wrap;
+            max-lines: 1;
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            Text { text: "{data.width}×{data.height}"; color: DesignTokens.text_dim; font-size: 9px; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
+    
+    TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double_clicked(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                root.right_clicked({ x: self.mouse_x, y: self.mouse_y });
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "NoirRAW — Cull & Develop";
+    preferred-width: 1600px;
+    preferred-height: 1000px;
+    background: DesignTokens.chrome;
+
+    // Library state
+    in-out property <[ThumbnailData]> thumbnails: [];
+    in-out property <int> selected-index: -1;
+    in-out property <int> hovered-index: -1;
+    in-out property <int> active-index: -1;
+    in-out property <string> library-folder: "";
+    in-out property <string> library-status: "No folder open";
+    in-out property <bool> grid-mode: true;
+    in-out property <int> multi-select-start: -1;
+
+    // Loupe state
+    in-out property <image> loupe-image;
+    in-out property <string> loupe-name: "";
+    in-out property <string> loupe-info: "";
+    in-out property <float> loupe-zoom: 1.0;
+
+    // Controls state
+    in-out property <string> working-status: "Open a folder to start culling";
+    in-out property <float> exposure-value: 0;
+    in-out property <float> contrast-value: 0;
+    in-out property <float> lut-opacity: 1;
+    in-out property <[string]> lut-labels: ["No LUT — native color"];
+    in-out property <string> selected-lut: "No LUT — native color";
+    in-out property <string> gpu-status: "GPU: initializing";
+
+    // Callbacks
+    callback open-folder();
+    callback select-thumbnail(int);
+    callback activate-thumbnail(int);
+    callback rate-thumbnail(int, int);
+    callback color-label-thumbnail(int, int);
+    callback pick-reject-thumbnail(int, int);
+    callback toggle-grid-loupe();
+    callback open-library-settings();
+    callback change-exposure(float);
+    callback change-contrast(float);
+    callback change-opacity(float);
+    callback select-lut(string);
+    callback refresh-library();
+    callback export-full();
+    callback key-pressed(string);
+
+    VerticalLayout {
+        spacing: 0px;
+        
+        // TOP BAR
+        Rectangle {
+            height: DesignTokens.top_bar_h;
+            background: DesignTokens.chrome;
+            border-width: 1px;
+            border-color: DesignTokens.divider;
+            HorizontalLayout {
+                padding-left: 16px; padding-right: 16px; spacing: 12px;
+                Text {text: "NOIRRAW"; font-size: 14px; font-weight: 700; color: DesignTokens.text; vertical-alignment: center;}
+                
+                // View mode tabs
+                HorizontalLayout { spacing: 2px;
+                    TouchArea {
+                        Rectangle { 
+                            padding-left: 6px; padding-right: 12px; padding-top: 6px; padding-bottom: 6px; 
+                            background: grid-mode ? DesignTokens.hover : Colors.transparent; 
+                            border-radius: 4px;
+                            Text { text: "Library"; color: grid-mode ? DesignTokens.text : DesignTokens.text_dim; font-size: 12px; font-weight: 600; }
+                        }
+                        clicked => { root.toggle-grid-loupe(); }
+                    }
+                    TouchArea {
+                        Rectangle { 
+                            padding-left: 6px; padding-right: 12px; padding-top: 6px; padding-bottom: 6px; 
+                            background: !grid-mode ? DesignTokens.hover : Colors.transparent; 
+                            border-radius: 4px;
+                            Text { text: "Develop"; color: !grid-mode ? DesignTokens.text : DesignTokens.text_dim; font-size: 12px; font-weight: 600; }
+                        }
+                        clicked => { root.toggle-grid-loupe(); }
+                    }
+                }
+                
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+                
+                // Search/filter
+                Rectangle {
+                    width: 280px;
+                    background: DesignTokens.field;
+                    border-width: 1px;
+                    border-color: DesignTokens.field_border;
+                    border-radius: 4px;
+                    HorizontalLayout { 
+                        padding-left: 4px; padding-right: 8px; padding-top: 4px; padding-bottom: 4px; 
+                        spacing: 6px;
+                        Text { text: "🔍"; color: DesignTokens.icon; font-size: 12px; vertical-alignment: center; }
+                        LineEdit { placeholder-text: "Filter..."; horizontal-stretch: 1; }
+                    }
+                }
+                
+                Button { text: "Open Folder"; clicked => {root.open-folder();} }
+                Button { text: "Settings"; clicked => {root.open-library-settings();} }
+                Button { text: "Export Full"; primary: true; clicked => {root.export-full();} }
+            }
+        }
+
+        // MAIN THREE-PANEL LAYOUT
+        HorizontalLayout {
+            spacing: 0px; vertical-stretch: 1;
+
+            // LEFT PANEL: Library / Grid
+            Rectangle {
+                width: grid-mode ? DesignTokens.panel_w : 0px;
+                background: DesignTokens.chrome;
+                border-width: 1px;
+                border-color: DesignTokens.divider;
+                VerticalLayout {
+                    padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px; spacing: 8px;
+                    HorizontalLayout {
+                        Text { text: root.library-folder == "" ? "No folder open" : root.library-folder; 
+                               color: DesignTokens.text; font-size: 13px; font-weight: 600; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "{root.thumbnails.length} images"; color: DesignTokens.text_dim; font-size: 11px; }
+                    }
+                    Rectangle { height: 1px; background: DesignTokens.divider; }
+                    
+                    // Filter bar
+                    HorizontalLayout { spacing: 6px;
+                        ComboBox { 
+                            model: ["All", "Picked", "Rejected", "Rated", "Color Labeled", "RAW"];
+                            current-value: "All";
+                        }
+                    }
+
+                    // Virtualized Grid
+                    ScrollView {
+                        vertical-stretch: 1;
+                        Rectangle {
+                            background: DesignTokens.grid_bg;
+                            GridLayout {
+                                spacing-horizontal: DesignTokens.cell_padding;
+                                spacing-vertical: DesignTokens.cell_padding;
+                                padding-left: DesignTokens.cell_padding; padding-right: DesignTokens.cell_padding; 
+                                padding-top: DesignTokens.cell_padding; padding-bottom: DesignTokens.cell_padding;
+                                for thumbnail[i] in root.thumbnails : ThumbnailView {
+                                    data: thumbnail;
+                                    clicked => { root.select-thumbnail(i); }
+                                    double-clicked => { root.activate-thumbnail(i); }
+                                    right_clicked(pos) => { /* context menu */ }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // CENTER PANEL: Loupe / Preview
+            Rectangle {
+                horizontal-stretch: 1;
+                background: DesignTokens.canvas;
+                VerticalLayout {
+                    padding-left: 12px; padding-right: 12px; padding-top: 12px; padding-bottom: 12px; spacing: 8px;
+                    HorizontalLayout {
+                        Text { text: root.loupe-name; color: DesignTokens.text; font-size: 13px; font-weight: 600; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.loupe-info; color: DesignTokens.text_dim; font-size: 11px; }
+                    }
+                    Rectangle {
+                        background: #080a0c;
+                        border-radius: 6px;
+                        vertical-stretch: 1;
+                        Image { 
+                            source: root.loupe-image; 
+                            image-fit: contain; 
+                            width: parent.width; 
+                            height: parent.height;
+                        }
+                    }
+                    Text { text: root.gpu-status; color: DesignTokens.text_dim; font-size: 11px; }
+                }
+            }
+
+            // RIGHT PANEL: Controls
+            Rectangle {
+                width: DesignTokens.panel_w;
+                background: DesignTokens.chrome;
+                border-width: 1px;
+                border-color: DesignTokens.divider;
+                VerticalLayout {
+                    padding-left: 16px; padding-right: 16px; padding-top: 16px; padding-bottom: 16px; spacing: 16px;
+                    
+                    // Develop controls
+                    Text {text: "DEVELOP"; font-size: 11px; font-weight: 700; color: DesignTokens.text; letter-spacing: 0.5px;}
+                    Rectangle {height: 1px; background: DesignTokens.divider;}
+                    
+                    VerticalLayout { spacing: 6px;
+                        Text {text: "Exposure  " + root.exposure-value.to-fixed(2) + " EV"; font-size: 12px; color: DesignTokens.text_label;}
+                        Slider {
+                            minimum: -5; maximum: 5; value: root.exposure-value;
+                            changed(value) => {root.exposure-value=value;root.change-exposure(value);}
+                        }
+                    }
+                    VerticalLayout { spacing: 6px;
+                        Text {text: "Contrast  " + root.contrast-value.to-fixed(2); font-size: 12px; color: DesignTokens.text_label;}
+                        Slider {
+                            minimum: -0.8; maximum: 1.5; value: root.contrast-value;
+                            changed(value) => {root.contrast-value=value;root.change-contrast(value);}
+                        }
+                    }
+
+                    Rectangle {height: 1px; background: DesignTokens.divider;}
+                    Text {text: "FILM LUT"; color: DesignTokens.text_dim; font-size: 11px; font-weight: 600;}
+                    ComboBox {
+                        model: root.lut-labels; current-value: root.selected-lut;
+                        selected(value) => {root.select-lut(value);}
+                    }
+                    Text {text: "LUT Strength  " + (root.lut-opacity * 100).to-fixed(0) + "%"; font-size: 12px; color: DesignTokens.text_label;}
+                    Slider {
+                        minimum: 0; maximum: 1; value: root.lut-opacity;
+                        changed(value) => {root.lut-opacity=value;root.change-opacity(value);}
+                    }
+
+                    Rectangle { vertical-stretch: 1; background: transparent; }
+                    
+                    // Keyboard shortcuts hint
+                    Rectangle {
+                        background: DesignTokens.inset; border-radius: 6px; 
+                        padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
+                        VerticalLayout { spacing: 3px;
+                            Text { text: "SHORTCUTS"; color: DesignTokens.text_dim; font-size: 9px; font-weight: 700; }
+                            Text { text: "← → Navigate  |  1-5 Rating  |  P/X Pick/Reject  |  6-9 Color  |  Space Select  |  G Bracket  |  Enter Loupe"; 
+                                   color: DesignTokens.text_dim; font-size: 9px; wrap: word-wrap; }
+                            Text { text: "F Fullscreen  |  C Compare  |  I Info  |  K Tags  |  / Search  |  ? Help"; 
+                                   color: DesignTokens.text_disabled; font-size: 9px; wrap: word-wrap; }
+                        }
+                    }
+                }
+            }
+        }
+
+        // BOTTOM STATUS BAR
+        Rectangle {
+            background: DesignTokens.chrome; height: DesignTokens.bottom_bar_h;
+            border-width: 1px;
+            border-color: DesignTokens.divider;
+            HorizontalLayout {
+                padding-left: 14px; padding-right: 14px;
+                Text {text: root.working-status; font-size: 11px; color: DesignTokens.text_label; vertical-alignment: center;}
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "NoirRAW 0.1.0"; color: DesignTokens.text_disabled; font-size: 10px; vertical-alignment: center; }
+            }
+        }
+    }
+
+    FocusScope {
+        key-pressed(key) => {
+            root.key-pressed(key.text);
+            reject
+        }
+    }
+}
