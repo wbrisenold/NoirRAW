@@ -94,7 +94,8 @@ impl ThumbnailCache {
 
         // Generate thumbnail
         if let Ok(bytes) = self.generator.generate(path) {
-            if let Ok(img) = Image::load_from_memory(&bytes) {
+            // Decode JPEG bytes and create Slint Image
+            if let Ok(img) = Self::bytes_to_slint_image(&bytes) {
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.insert(key.clone(), img.clone());
                 }
@@ -112,7 +113,7 @@ impl ThumbnailCache {
         }
 
         if let Ok(bytes) = self.generator.generate_from_bytes(data) {
-            if let Ok(img) = Image::load_from_memory(&bytes) {
+            if let Ok(img) = Self::bytes_to_slint_image(&bytes) {
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.insert(key.to_string(), img.clone());
                 }
@@ -120,6 +121,15 @@ impl ThumbnailCache {
             }
         }
         None
+    }
+
+    /// Convert JPEG/PNG bytes to Slint Image by decoding with image crate
+    fn bytes_to_slint_image(bytes: &[u8]) -> Option<Image> {
+        let img = image::load_from_memory(bytes).ok()?;
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let pixels = rgba.into_raw();
+        Image::from_rgba8(&pixels, width, height).ok()
     }
 
     pub fn clear(&self) {

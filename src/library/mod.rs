@@ -75,6 +75,23 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "dng", "tif", "tiff", "jpg", "jpeg", "png", "webp", "bmp", "heic", "heif",
 ];
 
+// ThumbnailData for UI (matches Slint-generated type)
+#[derive(Debug, Clone)]
+pub struct ThumbnailData {
+    pub path: String,
+    pub name: String,
+    pub rating: i32,
+    pub color_label: i32,
+    pub pick_reject: i32,
+    pub thumbnail: slint::Image,
+    pub width: i32,
+    pub height: i32,
+    pub has_raw: bool,
+    pub is_selected: bool,
+    pub is_active: bool,
+}
+
 // Re-export scanner types
 pub use scanner::{LibraryScanner, ScanOptions, ScanStats, ScannedImage};
+pub use db::LibraryDb;
 pub use thumbnail::{ThumbnailGenerator, ThumbnailCache};

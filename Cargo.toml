@@ -27,6 +27,14 @@ img_hash = "3.0"
 ort = { version = "=2.0.0-rc.13", optional = true }
 ndarray = { version = "0.16", optional = true }
 tokenizers = { version = "0.23", optional = true }
+rayon = "1.8"
+parking_lot = "0.12"
+quick-xml = { version = "0.42", features = ["serialize"] }
+tracing = "0.1"
+log = "0.4"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+hex = "0.4"
+# exif = { version = "0.7", optional = true }  # abandoned, using kamadak-exif instead
 
 [features]
 default = []

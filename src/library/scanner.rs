@@ -2,13 +2,16 @@ use super::*;
 use crate::image_io::SceneImage;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use exif::{In, Reader, Tag, Value as ExifValue};
 use image::ImageFormat;
+use quick_xml::{Reader, events::{Event, BytesStart, BytesEnd, BytesDecl, BytesText}};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+#[cfg(feature = "exif")]
+use kamadak_exif::{Exif, Tag};
 
 #[derive(Debug, Clone)]
 pub struct ScanOptions {
@@ -149,7 +152,7 @@ impl LibraryScanner {
     fn is_supported_extension(path: &Path) -> bool {
         path.extension()
             .and_then(|e| e.to_str())
-            .map(|e| SUPER::SUPPORTED_EXTENSIONS.iter().any(|&ext| ext.eq_ignore_ascii_case(e)))
+            .map(|e| super::SUPPORTED_EXTENSIONS.iter().any(|&ext| ext.eq_ignore_ascii_case(e)))
             .unwrap_or(false)
     }
 
@@ -292,12 +295,18 @@ impl LibraryScanner {
                 }
             }
         } else {
-            // For JPEG/TIFF/PNG, use exif crate
-            let file = fs::File::open(path)?;
-            let mut reader = Reader::new();
-            reader.read_from_container(&mut std::io::BufReader::new(file))?;
+            // For JPEG/TIFF/PNG, use kamadak_exif
+            #[cfg(feature = "exif")]
+            {
+                let file = fs::File::open(path)?;
+                let exif = kamadak_exif::Exif::from_reader(std::io::BufReader::new(file))?;
+                exif_data = Self::parse_exif(&exif);
+            }
             
-            exif_data = Self::parse_exif(&reader);
+            #[cfg(not(feature = "exif"))]
+            {
+                exif_data = None;
+            }
             
             // Get dimensions from image crate
             if let Ok(img) = image::open(path) {
@@ -328,21 +337,19 @@ impl LibraryScanner {
         Ok(Vec::new())
     }
 
-    fn parse_exif(reader: &Reader) -> Option<ExifData> {
+    #[cfg(feature = "exif")]
+    fn parse_exif(exif: &kamadak_exif::Exif) -> Option<ExifData> {
         let get_string = |tag: Tag| -> Option<String> {
-            reader.get_field(tag, In::PRIMARY).and_then(|f| {
-                f.value.display_as(tag).to_string().parse().ok()
-            })
+            exif.get(tag).and_then(|v| v.to_string().parse().ok())
         };
 
         let get_rational = |tag: Tag| -> Option<String> {
-            reader.get_field(tag, In::PRIMARY).and_then(|f| {
-                if let ExifValue::Rational(vec) = &f.value {
-                    if let Some(r) = vec.first() {
-                        return Some(format!("{}/{}", r.num, r.denom));
-                    }
+            exif.get(tag).and_then(|v| {
+                if let kamadak_exif::Value::Rational(num, denom) = v {
+                    Some(format!("{}/{}", num, denom))
+                } else {
+                    None
                 }
-                None
             })
         };
 
@@ -357,8 +364,8 @@ impl LibraryScanner {
             date_taken: get_string(Tag::DateTimeOriginal).or_else(|| get_string(Tag::DateTime)),
             exposure_compensation: get_rational(Tag::ExposureBiasValue),
             white_balance: get_string(Tag::WhiteBalance),
-            orientation: reader.get_field(Tag::Orientation, In::PRIMARY).and_then(|f| f.value.get_uint(0)),
-            gps: Self::parse_gps(reader),
+            orientation: exif.get(Tag::Orientation).and_then(|v| v.to_u32()),
+            gps: Self::parse_gps(exif),
             color_space: get_string(Tag::ColorSpace),
             exposure_program: get_string(Tag::ExposureProgram),
             metering_mode: get_string(Tag::MeteringMode),
@@ -367,19 +374,25 @@ impl LibraryScanner {
         })
     }
 
-    fn parse_gps(reader: &Reader) -> Option<GpsData> {
-        let lat_ref = reader.get_field(Tag::GPSLatitudeRef, In::PRIMARY)?;
-        let lat = reader.get_field(Tag::GPSLatitude, In::PRIMARY)?;
-        let lon_ref = reader.get_field(Tag::GPSLongitudeRef, In::PRIMARY)?;
-        let lon = reader.get_field(Tag::GPSLongitude, In::PRIMARY)?;
-        let alt = reader.get_field(Tag::GPSAltitude, In::PRIMARY);
+    #[cfg(not(feature = "exif"))]
+    fn parse_exif(_exif: &kamadak_exif::Exif) -> Option<ExifData> {
+        None
+    }
 
-        fn dms_to_deg(dms: &[ExifValue], ref_val: &ExifValue) -> Option<f64> {
-            if let (ExifValue::Rational(dms), ExifValue::Ascii(ref_bytes)) = (dms, ref_val) {
+    #[cfg(feature = "exif")]
+    fn parse_gps(exif: &kamadak_exif::Exif) -> Option<GpsData> {
+        let lat_ref = exif.get(Tag::GPSLatitudeRef)?;
+        let lat = exif.get(Tag::GPSLatitude)?;
+        let lon_ref = exif.get(Tag::GPSLongitudeRef)?;
+        let lon = exif.get(Tag::GPSLongitude)?;
+        let alt = exif.get(Tag::GPSAltitude);
+
+        fn dms_to_deg(dms: &kamadak_exif::Value, ref_val: &kamadak_exif::Value) -> Option<f64> {
+            if let (kamadak_exif::Value::Rational(dms), kamadak_exif::Value::Ascii(ref_bytes)) = (dms, ref_val) {
                 if dms.len() == 3 && !ref_bytes.is_empty() {
-                    let deg = dms[0].num as f64 / dms[0].denom as f64;
-                    let min = dms[1].num as f64 / dms[1].denom as f64;
-                    let sec = dms[2].num as f64 / dms[2].denom as f64;
+                    let deg = dms[0].0 as f64 / dms[0].1 as f64;
+                    let min = dms[1].0 as f64 / dms[1].1 as f64;
+                    let sec = dms[2].0 as f64 / dms[2].1 as f64;
                     let mut deg = deg + min / 60.0 + sec / 3600.0;
                     if ref_bytes[0] == b'S' || ref_bytes[0] == b'W' {
                         deg = -deg;
@@ -391,23 +404,28 @@ impl LibraryScanner {
         }
 
         let latitude = dms_to_deg(
-            &lat.value.into_rational_vec()?,
-            &lat_ref.value,
+            &exif.get(Tag::GPSLatitude)?,
+            &exif.get(Tag::GPSLatitudeRef)?,
         )?;
         let longitude = dms_to_deg(
-            &lon.value.into_rational_vec()?,
-            &lon_ref.value,
+            &exif.get(Tag::GPSLongitude)?,
+            &exif.get(Tag::GPSLongitudeRef)?,
         )?;
 
-        let altitude = alt.and_then(|a| {
-            if let ExifValue::Rational(vec) = &a.value {
-                vec.first().map(|r| r.num as f64 / r.denom as f64)
+        let altitude = exif.get(Tag::GPSAltitude).and_then(|a| {
+            if let kamadak_exif::Value::Rational(num, denom) = a {
+                Some(num as f64 / denom as f64)
             } else {
                 None
             }
         });
 
         Some(GpsData { latitude, longitude, altitude })
+    }
+
+    #[cfg(not(feature = "exif"))]
+    fn parse_gps(_exif: &kamadak_exif::Exif) -> Option<GpsData> {
+        None
     }
 
     fn generate_thumbnail(path: &Path, max_dim: u32) -> Result<Vec<u8>> {
@@ -502,46 +520,49 @@ pub mod xmp {
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) => {
-                    let name = std::str::from_utf8(e.name().as_ref())?;
+                    let name = std::str::from_utf8(e.name().as_bytes())?;
                     match name {
                         "xmp:Rating" | "Rating" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.rating = t.unescape()?.parse().ok();
+                                let s = quick_xml::escape::unescape(t.as_ref()).ok();
+                                metadata.rating = s.and_then(|s| s.parse().ok());
                             }
                         }
                         "xmp:Label" | "Label" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.label = Some(t.unescape()?.to_string());
+                                metadata.label = quick_xml::escape::unescape(t.as_ref()).ok().map(|s| s.to_string());
                             }
                         }
                         "cullimingo:PickReject" | "PickReject" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.pick_reject = t.unescape()?.parse().ok();
+                                let s = quick_xml::escape::unescape(t.as_ref()).ok();
+                                metadata.pick_reject = s.and_then(|s| s.parse().ok());
                             }
                         }
                         "dc:title" | "Title" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.title = Some(t.unescape()?.to_string());
+                                metadata.title = quick_xml::escape::unescape(t.as_ref()).ok().map(|s| s.to_string());
                             }
                         }
                         "dc:description" | "Description" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.description = Some(t.unescape()?.to_string());
+                                metadata.description = quick_xml::escape::unescape(t.as_ref()).ok().map(|s| s.to_string());
                             }
                         }
                         "dc:creator" | "Creator" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.creator = Some(t.unescape()?.to_string());
+                                metadata.creator = quick_xml::escape::unescape(t.as_ref()).ok().map(|s| s.to_string());
                             }
                         }
                         "dc:rights" | "Rights" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.copyright = Some(t.unescape()?.to_string());
+                                metadata.copyright = quick_xml::escape::unescape(t.as_ref()).ok().map(|s| s.to_string());
                             }
                         }
                         "dc:subject" | "Subject" => {
                             if let Ok(Event::Text(t)) = reader.read_event_into(&mut buf) {
-                                metadata.keywords.push(t.unescape()?.to_string());
+                                let s = quick_xml::escape::unescape(t.as_ref()).unwrap_or_default();
+                                metadata.keywords.push(s.to_string());
                             }
                         }
                         _ => {}
@@ -559,7 +580,7 @@ pub mod xmp {
     fn generate_xmp(metadata: &XmpMetadata) -> Result<String> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
         
-        writer.write_event(Event::Decl(BytesStart::new("xml")))?;
+        writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
         writer.write_event(Event::Start(BytesStart::new("x:xmpmeta")))?;
         writer.write_event(Event::Start(BytesStart::new("rdf:RDF")))?;
         writer.write_event(Event::Start(BytesStart::new("rdf:Description")))?;
@@ -589,9 +610,9 @@ pub mod xmp {
             write_simple(&mut writer, "dc:subject", kw)?;
         }
         
-        writer.write_event(Event::End(BytesStart::new("rdf:Description")))?;
-        writer.write_event(Event::End(BytesStart::new("rdf:RDF")))?;
-        writer.write_event(Event::End(BytesStart::new("x:xmpmeta")))?;
+        writer.write_event(Event::End(BytesEnd::new("rdf:Description")))?;
+        writer.write_event(Event::End(BytesEnd::new("rdf:RDF")))?;
+        writer.write_event(Event::End(BytesEnd::new("x:xmpmeta")))?;
         
         let result = writer.into_inner().into_inner();
         Ok(String::from_utf8(result)?)
@@ -600,7 +621,7 @@ pub mod xmp {
     fn write_simple(writer: &mut Writer<Cursor<Vec<u8>>>, name: &str, value: &str) -> Result<()> {
         writer.write_event(Event::Start(BytesStart::new(name)))?;
         writer.write_event(Event::Text(value.into()))?;
-        writer.write_event(Event::End(BytesStart::new(name)))?;
+        writer.write_event(Event::End(BytesEnd::new(name)))?;
         Ok(())
     }
 }

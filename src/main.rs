@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc, sync::mpsc, time::Duration};
 use slint::{ComponentHandle, ModelRc, VecModel, Image, SharedString};
-use noirraw::{image_io::{self, SceneImage}, lut::{self, Cube, LutEntry, InputSpace}, gpu::{GpuEngine, Controls}, library::{LibraryScanner, ScanOptions, ThumbnailGenerator, ThumbnailCache, LibraryImage, LibraryDb}};
+use noirraw::{image_io::{self, SceneImage}, lut::{self, Cube, LutEntry, InputSpace}, gpu::{GpuEngine, Controls}, library::{LibraryScanner, ScanOptions, ThumbnailGenerator, ThumbnailCache, LibraryImage, LibraryDb, ThumbnailData}};
 use slint::wgpu_30::wgpu;
 slint::include_modules!();
 
@@ -25,9 +25,10 @@ struct State {
     controls: Controls,
     dirty: bool,
     library_images: Vec<LibraryImage>,
-    thumbnails: Vec<noirraw::ui::app::ThumbnailData>,
+    thumbnails: Vec<ThumbnailData>,
     selected_index: i32,
     active_index: i32,
+    library_folder: String,
 }
 
 fn chosen<'a>(s: &'a State) -> Option<(&'a PathBuf, &'a Cube, InputSpace)> {
@@ -173,8 +174,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut thumbs = Vec::new();
                             for img in images.iter() {
                                 let thumb_img = thumb_cache.get_or_generate(&img.path)
-                                    .unwrap_or_else(|| Image::load_from_memory(&[]).unwrap());
-                                thumbs.push(noirraw::ui::app::ThumbnailData {
+                                    .unwrap_or_else(|| {
+                                        // Create a minimal placeholder image (1x1 transparent)
+                                        let rgba = [0u8, 0, 0, 0];
+                                        Image::from_rgb8(&rgba, 1, 1).unwrap()
+                                    });
+                                thumbs.push(ThumbnailData {
                                     path: img.path.to_string_lossy().to_string(),
                                     name: img.filename.clone(),
                                     rating: img.rating as i32,
@@ -295,8 +300,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut thumbs = Vec::new();
                             for img in images.iter() {
                                 let thumb_img = thumb_cache.get_or_generate(&img.path)
-                                    .unwrap_or_else(|| Image::load_from_memory(&[]).unwrap());
-                                thumbs.push(noirraw::ui::app::ThumbnailData {
+                                    .unwrap_or_else(|| {
+                                        // Create a minimal placeholder image (1x1 transparent)
+                                        let rgba = [0u8, 0, 0, 0];
+                                        Image::from_rgb8(&rgba, 1, 1).unwrap()
+                                    });
+                                thumbs.push(ThumbnailData {
                                     path: img.path.to_string_lossy().to_string(),
                                     name: img.filename.clone(),
                                     rating: img.rating as i32,
@@ -406,6 +415,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 app.set_working_status(format!("Rejected LUT: {e}").into());
                             }
                         }
+                    }
                     None => {
                         s.selected = None;
                         s.loaded = None;
@@ -463,7 +473,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.window().request_redraw();
                     }
                 }
-                "1"..="5" => {
+                key if key >= "1" && key <= "5" => {
                     if s.active_index >= 0 && s.active_index < s.thumbnails.len() as i32 {
                         let rating = key.parse::<i32>().unwrap_or(0);
                         s.thumbnails[s.active_index as usize].rating = rating;
